@@ -444,6 +444,22 @@ class TensorNameMap:
             "backbone.layers.{bid}.mixer.norm",  # mamba2
         ),
 
+        MODEL_TENSOR.SSM_IN_WSCALE: (
+            "backbone.layers.{bid}.in_proj.wscale",  # mamba2
+        ),
+        
+        MODEL_TENSOR.SSM_OUT_WSCALE: (
+            "backbone.layers.{bid}.out_proj.wscale",  # mamba2
+        ),
+
+        MODEL_TENSOR.SSM_IN_BIAS: (
+            "backbone.layers.{bid}.in_proj.wbias",  # mamba2
+        ),
+        
+        MODEL_TENSOR.SSM_OUT_BIAS: (
+            "backbone.layers.{bid}.out_proj.wbias",  # mamba2
+        ),
+
         MODEL_TENSOR.SSM_OUT: (
             "model.layers.{bid}.out_proj",
             "backbone.layers.{bid}.mixer.out_proj",

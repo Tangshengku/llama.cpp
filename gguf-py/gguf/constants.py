@@ -241,6 +241,7 @@ class MODEL_ARCH(IntEnum):
     RWKV6        = auto()
     MAMBA        = auto()
     MAMBA2       = auto()
+    BIMAMBA2     = auto()
     XVERSE       = auto()
     COMMAND_R    = auto()
     DBRX         = auto()
@@ -309,6 +310,10 @@ class MODEL_TENSOR(IntEnum):
     SSM_D                = auto()
     SSM_NORM             = auto()
     SSM_OUT              = auto()
+    SSM_IN_WSCALE        = auto()
+    SSM_IN_BIAS          = auto()
+    SSM_OUT_WSCALE       = auto()
+    SSM_OUT_BIAS         = auto()
     TIME_MIX_W1          = auto()
     TIME_MIX_W2          = auto()
     TIME_MIX_LERP_X      = auto()
@@ -405,6 +410,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.RWKV6:          "rwkv6",
     MODEL_ARCH.MAMBA:          "mamba",
     MODEL_ARCH.MAMBA2:         "mamba2",
+    MODEL_ARCH.BIMAMBA2:       "bimamba2",
     MODEL_ARCH.XVERSE:         "xverse",
     MODEL_ARCH.COMMAND_R:      "command-r",
     MODEL_ARCH.DBRX:           "dbrx",
@@ -473,6 +479,10 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.SSM_D:                     "blk.{bid}.ssm_d",
     MODEL_TENSOR.SSM_NORM:                  "blk.{bid}.ssm_norm",
     MODEL_TENSOR.SSM_OUT:                   "blk.{bid}.ssm_out",
+    MODEL_TENSOR.SSM_IN_WSCALE:             "blk.{bid}.mixer.in_proj.wscale",
+    MODEL_TENSOR.SSM_OUT_WSCALE:            "blk.{bid}.mixer.out_proj.wscale",
+    MODEL_TENSOR.SSM_IN_BIAS:               "blk.{bid}.mixer.in_proj.wbias",
+    MODEL_TENSOR.SSM_OUT_BIAS:              "blk.{bid}.mixer.out_proj.wbias",
     MODEL_TENSOR.TIME_MIX_W1:               "blk.{bid}.time_mix_w1",
     MODEL_TENSOR.TIME_MIX_W2:               "blk.{bid}.time_mix_w2",
     MODEL_TENSOR.TIME_MIX_LERP_X:           "blk.{bid}.time_mix_lerp_x",
@@ -1034,6 +1044,23 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.SSM_D,
         MODEL_TENSOR.SSM_NORM,
         MODEL_TENSOR.SSM_OUT,
+    ],
+    MODEL_ARCH.BIMAMBA2: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.SSM_IN,
+        MODEL_TENSOR.SSM_CONV1D,
+        MODEL_TENSOR.SSM_DT,
+        MODEL_TENSOR.SSM_A,
+        MODEL_TENSOR.SSM_D,
+        MODEL_TENSOR.SSM_NORM,
+        MODEL_TENSOR.SSM_OUT,
+        MODEL_TENSOR.SSM_IN_WSCALE,
+        MODEL_TENSOR.SSM_OUT_WSCALE,
+        MODEL_TENSOR.SSM_IN_BIAS,
+        MODEL_TENSOR.SSM_OUT_BIAS,
     ],
     MODEL_ARCH.XVERSE: [
         MODEL_TENSOR.TOKEN_EMBD,
