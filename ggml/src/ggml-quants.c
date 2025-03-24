@@ -2120,6 +2120,24 @@ void quantize_row_tq2_0_ref(const float * restrict x, block_tq2_0 * restrict y, 
     }
 }
 
+void quantize_row_bi_0_ref(const float * restrict x, block_bi_0 * restrict y, int64_t k) {
+    assert(k % QK_K == 0);
+    const int64_t nb = k / QK_K;
+
+    for (int64_t i = 0; i < nb; ++i) {
+        for (int j = 0; j < QK_K / 8; ++j) {
+            uint8_t q = 0;
+            for (int b = 0; b < 8; ++b) {
+                float v = x[i * QK_K + j * 8 + b];
+                int bit = (v >= 0.0f) ? 1 : 0; // 1 = +1, 0 = -1
+                q |= (bit << b);
+            }
+            y[i].qs[j] = q;
+        }
+    }
+}
+
+
 size_t quantize_tq1_0(const float * restrict src, void * restrict dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
     (void)quant_weights; // not used
     const size_t row_size = ggml_row_size(GGML_TYPE_TQ1_0, n_per_row);
@@ -2131,6 +2149,13 @@ size_t quantize_tq2_0(const float * restrict src, void * restrict dst, int64_t n
     (void)quant_weights; // not used
     const size_t row_size = ggml_row_size(GGML_TYPE_TQ2_0, n_per_row);
     quantize_row_tq2_0_ref(src, dst, (int64_t)nrow*n_per_row);
+    return nrow * row_size;
+}
+
+size_t quantize_bi_0(const float * restrict src, void * restrict dst, int64_t nrow, int64_t n_per_row, const float * quant_weights) {
+    (void)quant_weights; // not used
+    const size_t row_size = ggml_row_size(GGML_TYPE_BI_0, n_per_row);
+    quantize_row_bi_0_ref(src, dst, (int64_t)nrow*n_per_row);
     return nrow * row_size;
 }
 
@@ -2191,6 +2216,22 @@ void dequantize_row_tq2_0(const block_tq2_0 * restrict x, float * restrict y, in
         }
     }
 }
+
+void dequantize_row_bi_0(const block_bi_0 * restrict y, float * restrict x, int64_t k) {
+    assert(k % QK_K == 0);
+    const int64_t nb = k / QK_K;
+
+
+    for (int64_t i = 0; i < nb; ++i) {
+        const uint8_t * restrict qs = y[i].qs;
+        for (int j = 0; j < QK_K; ++j) {
+            int bit = (qs[j / 8] >> (j % 8)) & 1;
+            float sign = bit ? 1.0f : -1.0f;
+            x[i * QK_K + j] =  sign;
+        }
+    }
+}
+
 
 // ====================== "True" 2-bit (de)-quantization
 
@@ -5234,6 +5275,7 @@ bool ggml_validate_row_data(enum ggml_type type, const void * data, size_t nbyte
         case GGML_TYPE_I16:
         case GGML_TYPE_I32:
         case GGML_TYPE_I64:
+        case GGML_TYPE_BI_0:
             // nothing to validate
             break;
         default:

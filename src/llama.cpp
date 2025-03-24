@@ -4569,6 +4569,7 @@ struct llama_model_loader {
                 case GGML_TYPE_Q6_K:    ftype = LLAMA_FTYPE_MOSTLY_Q6_K;    break;
                 case GGML_TYPE_TQ1_0:   ftype = LLAMA_FTYPE_MOSTLY_TQ1_0;   break;
                 case GGML_TYPE_TQ2_0:   ftype = LLAMA_FTYPE_MOSTLY_TQ2_0;   break;
+                case GGML_TYPE_BI_0:   ftype = LLAMA_FTYPE_MOSTLY_BI_0;   break;
                 case GGML_TYPE_IQ2_XXS: ftype = LLAMA_FTYPE_MOSTLY_IQ2_XXS; break;
                 case GGML_TYPE_IQ2_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ2_XS;  break;
                 case GGML_TYPE_IQ2_S:   ftype = LLAMA_FTYPE_MOSTLY_IQ2_S;   break;
@@ -5332,6 +5333,7 @@ static std::string llama_model_ftype_name(llama_ftype ftype) {
         case LLAMA_FTYPE_MOSTLY_Q6_K:     return "Q6_K";
         case LLAMA_FTYPE_MOSTLY_TQ1_0:    return "TQ1_0 - 1.69 bpw ternary";
         case LLAMA_FTYPE_MOSTLY_TQ2_0:    return "TQ2_0 - 2.06 bpw ternary";
+        case LLAMA_FTYPE_MOSTLY_BI_0:    return "bi";
         case LLAMA_FTYPE_MOSTLY_IQ2_XXS:  return "IQ2_XXS - 2.0625 bpw";
         case LLAMA_FTYPE_MOSTLY_IQ2_XS:   return "IQ2_XS - 2.3125 bpw";
         case LLAMA_FTYPE_MOSTLY_IQ2_S:    return "IQ2_S - 2.5 bpw";
@@ -8737,8 +8739,8 @@ static bool llm_load_tensors(
 
                         layer.ssm_in = create_tensor(tn(LLM_TENSOR_SSM_IN, "weight", i), {n_embd, d_in_proj}, 0);
 
-                        layer.ssm_in_wscale = create_tensor(tn(LLM_TENSOR_SSM_IN, "wscale", i), {n_embd}, 0);
-                        layer.ssm_in_wbias = create_tensor(tn(LLM_TENSOR_SSM_IN, "wbias", i), {n_embd}, 0);
+                        layer.ssm_in_wscale = create_tensor(tn(LLM_TENSOR_SSM_IN, "wscale", i), {n_embd}, llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.ssm_in_wbias = create_tensor(tn(LLM_TENSOR_SSM_IN, "wbias", i), {n_embd}, llama_model_loader::TENSOR_NOT_REQUIRED);
                         layer.ssm_conv1d = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "weight", i), {d_conv, d_inner + 2*n_group*d_state}, 0);
                         layer.ssm_conv1d_b = create_tensor(tn(LLM_TENSOR_SSM_CONV1D, "bias", i), {d_inner + 2*n_group*d_state}, 0);
 
@@ -8752,8 +8754,8 @@ static bool llm_load_tensors(
 
                         // out_proj
                         layer.ssm_out = create_tensor(tn(LLM_TENSOR_SSM_OUT, "weight", i), {d_inner, n_embd}, 0);
-                        layer.ssm_out_wscale = create_tensor(tn(LLM_TENSOR_SSM_OUT, "wscale", i), {d_inner},  0);
-                        layer.ssm_out_wbias = create_tensor(tn(LLM_TENSOR_SSM_OUT, "wbias", i), {d_inner},  0);
+                        layer.ssm_out_wscale = create_tensor(tn(LLM_TENSOR_SSM_OUT, "wscale", i), {d_inner},  llama_model_loader::TENSOR_NOT_REQUIRED);
+                        layer.ssm_out_wbias = create_tensor(tn(LLM_TENSOR_SSM_OUT, "wbias", i), {d_inner},  llama_model_loader::TENSOR_NOT_REQUIRED);
                     }
                 } break;
             case LLM_ARCH_XVERSE:
@@ -18988,7 +18990,8 @@ static ggml_type llama_tensor_get_type(quantize_state_internal & qs, ggml_type n
                      new_type == GGML_TYPE_Q4_0_8_8) {
                 new_type = GGML_TYPE_Q4_0;
             }
-            else if (ftype == LLAMA_FTYPE_MOSTLY_TQ1_0 || ftype == LLAMA_FTYPE_MOSTLY_TQ2_0) {
+            else if (ftype == LLAMA_FTYPE_MOSTLY_TQ1_0 || ftype == LLAMA_FTYPE_MOSTLY_TQ2_0
+                || ftype == LLAMA_FTYPE_MOSTLY_BI_0) {
                 new_type = GGML_TYPE_Q4_K;
             }
         }
@@ -19191,6 +19194,7 @@ static ggml_type llama_tensor_get_type(quantize_state_internal & qs, ggml_type n
     if (convert_incompatible_tensor) {
         switch (new_type) {
             case GGML_TYPE_TQ1_0:
+            case GGML_TYPE_BI_0:   new_type = GGML_TYPE_Q4_0; break;
             case GGML_TYPE_TQ2_0:  new_type = GGML_TYPE_Q4_0; break;  // TODO: use a symmetric type instead
             case GGML_TYPE_IQ2_XXS:
             case GGML_TYPE_IQ2_XS:
@@ -19299,6 +19303,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         case LLAMA_FTYPE_MOSTLY_Q6_K:    default_type = GGML_TYPE_Q6_K;    break;
         case LLAMA_FTYPE_MOSTLY_TQ1_0:   default_type = GGML_TYPE_TQ1_0;   break;
         case LLAMA_FTYPE_MOSTLY_TQ2_0:   default_type = GGML_TYPE_TQ2_0;   break;
+        case LLAMA_FTYPE_MOSTLY_BI_0:   default_type = GGML_TYPE_BI_0;   break;
         case LLAMA_FTYPE_MOSTLY_IQ2_XXS: default_type = GGML_TYPE_IQ2_XXS; break;
         case LLAMA_FTYPE_MOSTLY_IQ2_XS:  default_type = GGML_TYPE_IQ2_XS;  break;
         case LLAMA_FTYPE_MOSTLY_IQ2_S:   default_type = GGML_TYPE_IQ2_XS;  break;

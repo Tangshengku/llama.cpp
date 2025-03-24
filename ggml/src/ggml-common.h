@@ -246,6 +246,11 @@ typedef struct {
 } block_tq2_0;
 static_assert(sizeof(block_tq2_0) == sizeof(ggml_half) + QK_K / 4, "wrong tq2_0 block size/padding");
 
+
+typedef struct {
+    uint8_t qs[QK_K / 8];  // Binarized weights (1-bit per weight)
+} block_bi_0;
+
 //
 // Super-block quantization structures
 //

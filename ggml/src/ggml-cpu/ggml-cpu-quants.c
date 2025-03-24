@@ -1644,6 +1644,12 @@ void quantize_row_tq2_0(const float * restrict x, void * restrict vy, int64_t k)
     quantize_row_tq2_0_ref(x, y, k);
 }
 
+void quantize_row_bi_0(const float * restrict x, void * restrict vy, int64_t k) {
+    assert(k % QK_K == 0);
+    block_bi_0 * restrict y = vy;
+    quantize_row_bi_0_ref(x, y, k);
+}
+
 static const int8_t kvalues_iq4nl[16] = {-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113};
 
 //===================================== Q8_K ==============================================
@@ -4177,6 +4183,143 @@ void ggml_vec_dot_tq2_0_q8_K(int n, float * restrict s, size_t bs, const void * 
     *s = sumf;
 #endif
 }
+
+
+void ggml_vec_dot_bi_0_q8_K(int n, float * restrict s, size_t bs, const void * restrict vx, size_t bx, const void * restrict vy, size_t by, int nrc) {
+    assert(nrc == 1);
+    UNUSED(nrc);
+    UNUSED(bx);
+    UNUSED(by);
+    UNUSED(bs);
+
+    const block_bi_0 * restrict x = (const block_bi_0 *) vx;
+    const block_q8_K * restrict y = (const block_q8_K *) vy;
+    
+
+    const int nb = n / QK_K;
+    
+
+#if defined(__AVX2__)
+    __m256 vsum = _mm256_setzero_ps();
+
+    for (int i = 0; i < nb; ++i) {
+        const uint8_t * restrict qs = x[i].qs;
+        const int8_t  * restrict xq = y[i].qs;
+        const float d = y[i].d;
+        const __m256 v_d = _mm256_set1_ps(d);
+
+        __m256 sumf = _mm256_setzero_ps();
+
+        for (int j = 0; j < QK_K; j += 32) {
+            // Load 32 int8 activations
+            __m256i a = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *) &xq[j]));
+            __m256i a_hi = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *) &xq[j + 16]));
+
+            // Load 32 bits (1 bit per weight)
+            uint32_t bits = *((const uint32_t *) &qs[j / 8]);
+
+            // Convert to int8 signs {-1, +1}
+            int8_t signs[32];
+            for (int b = 0; b < 32; ++b)
+                signs[b] = ((bits >> b) & 1) ? 1 : -1;
+
+            __m256i b0 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *) &signs[0]));
+            __m256i b1 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *) &signs[16]));
+
+            // Multiply: int16_t * int16_t → int32_t
+            __m256i prod0 = _mm256_mullo_epi16(a, b0);
+            __m256i prod1 = _mm256_mullo_epi16(a_hi, b1);
+
+            // Horizontal add to 8 int32 values each
+            __m256i sum_i32 = _mm256_add_epi32(_mm256_madd_epi16(prod0, _mm256_set1_epi16(1)),
+                                            _mm256_madd_epi16(prod1, _mm256_set1_epi16(1)));
+
+            // Convert to float32
+            __m256 sumf32 = _mm256_cvtepi32_ps(sum_i32);
+
+            // FMA: vsum += sumf32 * d
+            vsum = _mm256_fmadd_ps(sumf32, v_d, vsum);
+        }
+    }
+
+    *s = hsum_float_8(vsum); // horizontal sum helper
+
+#elif defined(__ARM_NEON)
+    float32x4_t vsum = vdupq_n_f32(0.0f);
+
+    for (int i = 0; i < nb; ++i) {
+        const uint8_t * restrict qs = x[i].qs;
+        const int8_t  * restrict xq = y[i].qs;
+        const float d = y[i].d;
+        float32x4_t v_d = vdupq_n_f32(d);
+
+#if defined(__ARM_FEATURE_DOTPROD)
+        int32x4_t sumi = vdupq_n_s32(0);
+#else
+        int16x8_t sumi = vdupq_n_s16(0);
+#endif
+
+        for (int j = 0; j < QK_K; j += 16) {
+            // Load 16 q8 activations
+            int8x16_t a = vld1q_s8(&xq[j]);
+
+            // Load 2 bytes of 1-bit binary weights (16 weights)
+            uint16_t bits = ((uint16_t)qs[j / 8 + 1] << 8) | qs[j / 8];
+            int8_t signs[16];
+            for (int b = 0; b < 16; ++b)
+                signs[b] = ((bits >> b) & 1) ? 1 : -1;
+
+            int8x16_t b_bytes = vld1q_s8(signs);
+            // uint8x16_t b_bytes = vreinterpretq_u8_u64(vcombine_u64(vdup_n_u64(bits), vdup_n_u64(0)));
+            b_bytes = vandq_u8(b_bytes, vdupq_n_u8(0x01));
+
+            // Convert 0 → -1, 1 → +1: sign = (bit << 1) - 1
+            int8x16_t b = vsubq_s8(vshlq_n_s8(vreinterpretq_s8_u8(b_bytes), 1), vdupq_n_s8(1));
+
+#if defined(__ARM_FEATURE_DOTPROD)
+            sumi = vdotq_s32(sumi, b, a);
+#else
+            int16x8_t m0 = vmull_s8(vget_low_s8(b), vget_low_s8(a));
+            int16x8_t m1 = vmull_s8(vget_high_s8(b), vget_high_s8(a));
+            sumi = vaddq_s16(sumi, m0);
+            sumi = vaddq_s16(sumi, m1);
+#endif
+        }
+
+#if defined(__ARM_FEATURE_DOTPROD)
+        vsum = vfmaq_f32(vsum, vcvtq_f32_s32(sumi), v_d);
+#else
+        vsum = vfmaq_f32(vsum, vcvtq_f32_s32(vmovl_s16(vget_low_s16(sumi))), v_d);
+#endif
+    }
+
+    *s = vaddvq_f32(vsum);
+
+
+#else
+    float sumf = 0.0f;
+
+    for (int i = 0; i < nb; ++i) {
+        const uint8_t * restrict qs = x[i].qs;
+        const int8_t  * restrict xq = y[i].qs;
+        const float d = y[i].d;
+
+        for (int j = 0; j < QK_K; ++j) {
+            // Read the 1-bit weight
+            int byte_index = j / 8;
+            int bit_index  = j % 8;
+            int bit = (qs[byte_index] >> bit_index) & 1;
+
+            float sign = bit ? 1.0f : -1.0f;
+
+            sumf += sign * (float)xq[j] * d;
+        }
+    }
+
+    *s = sumf;
+#endif
+}
+
 
 void ggml_vec_dot_q2_K_q8_K(int n, float * restrict s, size_t bs, const void * restrict vx, size_t bx, const void * restrict vy, size_t by, int nrc) {
     assert(nrc == 1);
